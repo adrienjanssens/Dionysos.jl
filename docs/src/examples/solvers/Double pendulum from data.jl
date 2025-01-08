@@ -14,7 +14,7 @@ include(joinpath(dirname(dirname(pathof(Dionysos))), "problems", "double_pendulu
 concrete_problem = DoublePendulum.problem(; approx_mode = "growth")
 concrete_system = concrete_problem.system
 x0 = SVector(0.0, 0.0, 0.0, 0.0)
-hx = SVector(0.3, 0.3, 0.3, 0.3)
+hx = SVector(0.2, 0.2, 0.2, 0.2)
 state_grid = DO.GridFree(x0, hx)
 u0 = SVector(0.0);
 h = SVector(1.); # discretization step of the input space
