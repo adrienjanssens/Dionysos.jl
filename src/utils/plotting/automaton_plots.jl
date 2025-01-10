@@ -23,16 +23,16 @@ function analyze_non_determinism(a)
     all_counts = collect(values(count))
     all_self_loops = collect(values(self_loops))
 
-    path = "C:/Users/adrie/OneDrive - UCL/Master 2"
+    path = "C:/Users/adrie/OneDrive - UCL/Master 2/mémoire visus/data"
 
     # Write all_counts and self_loop_values to a text file
-    open(joinpath(path,"all_counts2.txt"), "w") do file
+    open(joinpath(path,"all_base.txt"), "w") do file
         # Write all_counts
         for value in all_counts
             println(file, value)
         end
     end
-    open(joinpath(path, "all_self_loops2.txt"), "w") do file
+    open(joinpath(path, "sl_base.txt"), "w") do file
         # Write self_loop_values
         for value in all_self_loops
             println(file, value)
