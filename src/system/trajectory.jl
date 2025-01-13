@@ -115,16 +115,19 @@ function get_closed_loop_trajectory(contsys, controller, x0, nstep; stopping = (
     x_traj = [x]
     u_traj = []
     i = 0
+    total_time = 0.0
     while !stopping(x) && i ≤ nstep
         u = controller(x)
         if u === nothing
             break
         end
+        total_time += contsys.tstep
         x = contsys.sys_map(x, u, contsys.tstep)
         push!(x_traj, x)
         push!(u_traj, u)
         i = i + 1
     end
+    println("Total time: ", total_time)
     return Control_trajectory(Trajectory(x_traj), Trajectory(u_traj))
 end
 
