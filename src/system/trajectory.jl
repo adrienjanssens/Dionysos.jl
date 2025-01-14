@@ -114,20 +114,32 @@ function get_closed_loop_trajectory(contsys, controller, x0, nstep; stopping = (
     x = x0
     x_traj = [x]
     u_traj = []
+    u_traj2 = []
+    t_traj = []
     i = 0
     total_time = 0.0
+    energy = 0.0
+    control_effort = 0.0
     while !stopping(x) && i ≤ nstep
         u = controller(x)
         if u === nothing
             break
         end
+        energy += u[1] * x[2] * contsys.tstep
+        control_effort += u[1]^2 * contsys.tstep
         total_time += contsys.tstep
         x = contsys.sys_map(x, u, contsys.tstep)
         push!(x_traj, x)
         push!(u_traj, u)
+        push!(u_traj2, u[1])
+        push!(t_traj, total_time)
         i = i + 1
     end
     println("Total time: ", total_time)
+    println("Energy: ", energy)
+    println("Control effort: ", control_effort)
+    p = plot(t_traj, u_traj2, label="u(t)", seriestype=:steppost, xlabel="Time", ylabel="u", title="Step Plot of u")
+    display(p)
     return Control_trajectory(Trajectory(x_traj), Trajectory(u_traj))
 end
 
