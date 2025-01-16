@@ -11,6 +11,7 @@ const SY = DI.Symbolic
 const PR = DI.Problem
 
 using JuMP
+using DataStructures
 
 """
     Optimizer{T} <: MOI.AbstractOptimizer
@@ -22,12 +23,13 @@ mutable struct Optimizer{T} <: MOI.AbstractOptimizer
     abstract_problem::Union{Nothing, PR.OptimalControlProblem, PR.SafetyProblem}
     abstract_system::Union{Nothing, SY.SymbolicModelList}
     abstract_controller::Union{Nothing, UT.SortedTupleSet{2, NTuple{2, Int}}}
+    value_function::Union{Nothing, DefaultDict{Int, Float64}}
     concrete_controller::Any
     state_grid::Union{Nothing, DO.Grid}
     input_grid::Union{Nothing, DO.Grid}
     solve_time_sec::T
     function Optimizer{T}() where {T}
-        return new{T}(nothing, nothing, nothing, nothing, nothing, nothing, nothing, 0.0)
+        return new{T}(nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing, 0.0)
     end
 end
 Optimizer() = Optimizer{Float64}()
@@ -53,10 +55,6 @@ function build_abstraction(concrete_system, state_grid::DO.Grid, input_grid::DO.
     @time SY.compute_symmodel_from_data!(abstract_system, concrete_system.f)
     return abstract_system
 end
-
-
-
-
 
 function build_abstract_problem(
     concrete_problem::PR.OptimalControlProblem,
@@ -99,10 +97,11 @@ function build_abstract_problem(
     )
 end
 
-function solve_abstract_problem(abstract_problem::PR.OptimalControlProblem)
+function solve_abstract_problem(abstract_system, abstract_problem::PR.OptimalControlProblem)
     abstract_controller = NewControllerList()
     compute_controller_reach!(
         abstract_controller,
+        abstract_system,
         abstract_problem.system.autom,
         abstract_problem.initial_set,
         abstract_problem.target_set,
@@ -110,7 +109,7 @@ function solve_abstract_problem(abstract_problem::PR.OptimalControlProblem)
     return abstract_controller
 end
 
-function solve_abstract_problem(abstract_problem::PR.SafetyProblem)
+function solve_abstract_problem(abstract_system, abstract_problem::PR.SafetyProblem)
     abstract_controller = NewControllerList()
     compute_controller_safe!(
         abstract_controller,
@@ -145,6 +144,19 @@ function solve_concrete_problem(abstract_system, abstract_controller)
     end
 end
 
+function solve_value_function(abstract_controller, abstract_system, abstract_problem::PR.OptimalControlProblem)
+    value_function = DefaultDict{Int, Float64}(typemax(Int))
+    compute_value_function!(
+        value_function,
+        abstract_controller,
+        abstract_system,
+        abstract_problem.system.autom,
+        abstract_problem.initial_set,
+        abstract_problem.target_set,
+    )
+    return value_function
+end
+
 function MOI.optimize!(optimizer::Optimizer)
     t_ref = time()
 
@@ -161,18 +173,70 @@ function MOI.optimize!(optimizer::Optimizer)
     optimizer.abstract_problem = abstract_problem
 
     # Solve the abstract problem
-    abstract_controller = solve_abstract_problem(abstract_problem)
+    abstract_controller = solve_abstract_problem(abstract_system, abstract_problem)
     optimizer.abstract_controller = abstract_controller
     
     # Solve the concrete problem
     optimizer.concrete_controller =
         solve_concrete_problem(abstract_system, abstract_controller)
 
+    value_function = solve_value_function(abstract_controller, abstract_system, abstract_problem)
+    optimizer.value_function = value_function
+
     optimizer.solve_time_sec = time() - t_ref
     return
 end
 
 NewControllerList() = UT.SortedTupleSet{2, NTuple{2, Int}}()
+
+function compute_value_function!(g, contr, abstract_system, autom, initlist, targetlist::Vector{Int})
+    # data
+    num_targets_unreachable = zeros(Int, autom.nstates, autom.nsymbols)
+    _compute_num_targets_unreachable(num_targets_unreachable, autom)
+    init_set = BitSet(initlist)
+    target_set = BitSet(targetlist)
+    current_targets = copy(targetlist)
+    next_targets = Int[]
+    # compute the value function
+    for t in target_set
+        g[t] = 0.0
+    end
+    num_init_unreachable = length(init_set)
+    post = Int[]
+    while !isempty(current_targets) && !iszero(num_init_unreachable)
+        empty!(next_targets)
+        for target in current_targets
+            for (source, symbol) in SY.pre(autom, target)   # pre = predecesseur
+                if !(source in target_set) &&                           
+                iszero(num_targets_unreachable[source, symbol] -= 1)
+                    symbollist = UT.fix_and_eliminate_first(contr, source)
+                    if isempty(symbollist)
+                        continue
+                    end
+                    u_policy = collect(symbollist)[1][1]
+                    if u_policy == symbol
+                        push!(target_set, source)
+                        push!(next_targets, source)
+                        if source in init_set
+                            num_init_unreachable -= 1
+                        end
+                        empty!(post)
+                        SY.compute_post!(post, autom, source, symbol)
+                        gmax = 0.0
+                        for q in post
+                            gmax = max(gmax, g[q])
+                        end
+                        u_symb = SY.get_upos_by_symbol(abstract_system, symbol)
+                        true_u = DO.get_coord_by_pos(abstract_system.Udom.grid, u_symb)
+                        cost = 0.3 * true_u[1]^2
+                        g[source] = cost + gmax
+                    end
+                end
+            end
+        end
+        current_targets, next_targets = next_targets, current_targets
+    end
+end 
 
 function _compute_num_targets_unreachable(num_targets_unreachable, autom)
     for target in 1:(autom.nstates)
@@ -220,18 +284,107 @@ function _data(contr, autom, initlist, targetlist)
     next_targets = Int[]
     return initset, targetset, num_targets_unreachable, current_targets, next_targets
 end
-function compute_controller_reach!(contr, autom, initlist, targetlist::Vector{Int})
+
+function _compute_controller_reach_with_cost!(
+    contr,
+    abstract_system,
+    autom,
+    init_set,                # set of initial states
+    target_set,              # set of target states
+    num_targets_unreachable, # see _compute_num_targets_unreachable
+    N, 
+    g, 
+    f,
+)     
+    num_init_unreachable = length(init_set)
+    M = Int[]
+    controlDict = Dict{Int, Int}()   # controlDict = {source : symbol} (the policy)
+    for t in target_set
+        g[t] = 0
+        enqueue!(N, (t, -1), 0)
+    end
+    post = Int[]
+    iter = 0
+    while !isempty(N) && !iszero(num_init_unreachable)
+        (q, u_opt) = dequeue!(N)
+        if !(q in M) 
+            push!(M, q)
+            if q in init_set
+                num_init_unreachable -= 1
+            end
+            iter += 1
+            if iter % 500 == 0 
+                println("states in M $iter out of $(autom.nstates)")
+                println("   initial set reachability : $(length(init_set) - num_init_unreachable)")
+            end
+            if u_opt != -1
+                g[q] = f[q,u_opt]
+                controlDict[q] = u_opt
+            end
+            for (qminus, symbol) in SY.pre(autom, q) 
+                if !(qminus in M) && iszero(num_targets_unreachable[qminus, symbol] -= 1) #&& !(qminus in target_set)
+                    empty!(post)
+                    SY.compute_post!(post, autom, qminus, symbol)
+                    gmax = 0
+                    for qprime in post
+                        gmax = max(gmax, g[qprime])
+                    end
+                    time = 0.3 
+                    u_symb = SY.get_upos_by_symbol(abstract_system, symbol)
+                    true_u = DO.get_coord_by_pos(abstract_system.Udom.grid, u_symb)
+                    cost = time * true_u[1]^2
+                    f[qminus, symbol] = cost + gmax
+                    enqueue!(N, (qminus, symbol), f[qminus, symbol])
+                end
+            end
+        end
+    end
+    println("number of init unreachable $num_init_unreachable out of $(length(init_set))") 
+    # build the controller from the optimal policy
+    for q in keys(controlDict)
+        UT.push_new!(contr, (q, controlDict[q]))
+    end
+    return iszero(num_init_unreachable)
+end
+
+function _data_cost(contr, autom, initlist, targetlist)
+    num_targets_unreachable = zeros(Int, autom.nstates, autom.nsymbols)
+    _compute_num_targets_unreachable(num_targets_unreachable, autom)
+    initset = BitSet(initlist)
+    targetset = BitSet(targetlist)
+    N = PriorityQueue{Tuple{Int,Int}, Float64}()            
+    g = DefaultDict{Int, Float64}(typemax(Int))             # g = {source : cost} (belmann value function)
+    f = DefaultDict{Tuple{Int,Int}, Float64}(typemax(Int))  # f = {(source, input) : cost} (belmann value function)
+    return initset, targetset, num_targets_unreachable, N, g, f
+end
+
+
+function compute_controller_reach!(contr, abstract_system, autom, initlist, targetlist::Vector{Int})
     println("compute_controller_reach! started")
     # TODO: try to infer whether num_targets_unreachable is sparse or not,
     # and if sparse, use a dictionary instead
-    if !_compute_controller_reach!(
-        contr,
-        autom,
-        _data(contr, autom, initlist, targetlist)...,
-    )
-        println("\ncompute_controller_reach! terminated without covering init set")
-        # ProgressMeter.finish!(prog)
-        return
+    cost = true
+    if cost 
+        if !_compute_controller_reach_with_cost!(
+            contr,
+            abstract_system,
+            autom,
+            _data_cost(contr, autom, initlist, targetlist)...,
+        )
+            println("\ncompute_controller_reach! terminated without covering init set")
+            # ProgressMeter.finish!(prog)
+            return
+        end
+    else 
+        if !_compute_controller_reach!(
+            contr,
+            autom,
+            _data(contr, autom, initlist, targetlist)...,
+        )
+            println("\ncompute_controller_reach! terminated without covering init set")
+            # ProgressMeter.finish!(prog)
+            return
+        end
     end
     # ProgressMeter.finish!(prog)
     return println("\ncompute_controller_reach! terminated with success")

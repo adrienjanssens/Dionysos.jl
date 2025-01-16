@@ -32,6 +32,7 @@ abstract_system = MOI.get(optimizer, MOI.RawOptimizerAttribute("abstract_system"
 abstract_problem = MOI.get(optimizer, MOI.RawOptimizerAttribute("abstract_problem"))
 abstract_controller = MOI.get(optimizer, MOI.RawOptimizerAttribute("abstract_controller"))
 concrete_controller = MOI.get(optimizer, MOI.RawOptimizerAttribute("concrete_controller"))
+value_function = MOI.get(optimizer, MOI.RawOptimizerAttribute("value_function"))
 
 automaton = abstract_system.autom
 UT.analyze_non_determinism(automaton)
@@ -49,8 +50,11 @@ function reached(x)
         return false
     end
 end
-#x0 = SVector(0.15,0.0)
+
 x0 = SVector(0.0,0.0) # SVector(pi+0.15,0.5)
+x0_state  = SY.get_state_by_coord(abstract_system, x0)
+println("worst case cost: ", value_function[x0_state])
+
 control_trajectory =
     ST.get_closed_loop_trajectory(concrete_system.f, concrete_controller, x0, nstep;
     stopping = reached)

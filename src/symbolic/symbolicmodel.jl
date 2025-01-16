@@ -1,6 +1,8 @@
 using Plots, Colors
 using ProgressMeter
 
+using Random
+
 """
     SymbolicModel{N, M}
 
@@ -97,7 +99,7 @@ end
 function compute_symmodel_from_data!(
     symmodel::SymbolicModel{N},
     contsys::ST.ControlSystemGrowth{N};
-    n_samples = 50,
+    n_samples = 200,
     ε = 0.0
     ) where {N}
     println("compute_symmodel_from_data! started")
@@ -105,6 +107,8 @@ function compute_symmodel_from_data!(
     dim = length(Xdom.grid.orig)
     Udom = symmodel.Udom
     tstep = contsys.tstep
+
+    Random.seed!(1234)
 
     transdict = Dict{Tuple{Int, Int, Int}, Float64}() # {(target, source, symbol): prob}
 
