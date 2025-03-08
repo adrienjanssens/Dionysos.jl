@@ -99,7 +99,7 @@ end
 function compute_symmodel_from_data!(
     symmodel::SymbolicModel{N},
     contsys::ST.ControlSystemGrowth{N};
-    n_samples = 200,
+    n_samples = 50,
     ε = 0.0
     ) where {N}
     println("compute_symmodel_from_data! started")
@@ -107,6 +107,8 @@ function compute_symmodel_from_data!(
     dim = length(Xdom.grid.orig)
     Udom = symmodel.Udom
     tstep = contsys.tstep
+    divide = true
+    factor = 5
 
     Random.seed!(1234)
 
@@ -119,15 +121,25 @@ function compute_symmodel_from_data!(
         u = DO.get_coord_by_pos(Udom.grid, upos)
         enum_x = DO.enum_pos(Xdom)
         for (j, xpos) in enumerate(DO.enum_pos(Xdom)) # for each cell
-            # if j % 10000 == 0
-            #     println("  $j / $(length(enum_x))")
-            # end
 
             source = get_state_by_xpos(symmodel, xpos) # cellule source
             rec = DO.get_rec(Xdom.grid, xpos)
             # uniform sampling in the cell
             x_sampled = [SVector(rec.lb .+ (rec.ub .- rec.lb) .* rand(dim)) for _ in 1:n_samples]
-            Fx_sampled = [contsys.sys_map(x, u, tstep) for x ∈ x_sampled] # x_k+1
+            if divide 
+                tstep_div = tstep / factor
+                Fx_sampled = x_sampled
+                for i in 1:factor 
+                    Fx_sampled = [contsys.sys_map(x, u, tstep_div) for x ∈ Fx_sampled] # x_k+1
+                    pos_sampled = [DO.get_pos_by_coord(Xdom.grid, Fx) for Fx ∈ Fx_sampled]
+                    pos_contained_sampled = [ypos ∈ Xdom for ypos in pos_sampled]
+                    if !all(pos_contained_sampled)
+                        break
+                    end
+                end
+            else 
+                Fx_sampled = [contsys.sys_map(x, u, tstep) for x ∈ x_sampled] # x_k+1
+            end
             pos_sampled = [DO.get_pos_by_coord(Xdom.grid, Fx) for Fx ∈ Fx_sampled]
             pos_contained_sampled = [ypos ∈ Xdom for ypos in pos_sampled]
             if !all(pos_contained_sampled)

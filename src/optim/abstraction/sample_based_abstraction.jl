@@ -146,6 +146,7 @@ end
 
 function solve_value_function(abstract_controller, abstract_system, abstract_problem::PR.OptimalControlProblem)
     value_function = DefaultDict{Int, Float64}(typemax(Int))
+    println("compute_value_function! started")
     compute_value_function!(
         value_function,
         abstract_controller,
@@ -153,7 +154,7 @@ function solve_value_function(abstract_controller, abstract_system, abstract_pro
         abstract_problem.system.autom,
         abstract_problem.initial_set,
         abstract_problem.target_set,
-    )
+    ) 
     return value_function
 end
 
@@ -226,9 +227,10 @@ function compute_value_function!(g, contr, abstract_system, autom, initlist, tar
                         for q in post
                             gmax = max(gmax, g[q])
                         end
+                        time = 1.5
+                        cost = time
                         u_symb = SY.get_upos_by_symbol(abstract_system, symbol)
                         true_u = DO.get_coord_by_pos(abstract_system.Udom.grid, u_symb)
-                        cost = 0.3 * true_u[1]^2
                         g[source] = cost + gmax
                     end
                 end
@@ -236,6 +238,7 @@ function compute_value_function!(g, contr, abstract_system, autom, initlist, tar
         end
         current_targets, next_targets = next_targets, current_targets
     end
+    return iszero(num_init_unreachable)
 end 
 
 function _compute_num_targets_unreachable(num_targets_unreachable, autom)
@@ -363,7 +366,7 @@ function compute_controller_reach!(contr, abstract_system, autom, initlist, targ
     println("compute_controller_reach! started")
     # TODO: try to infer whether num_targets_unreachable is sparse or not,
     # and if sparse, use a dictionary instead
-    cost = true
+    cost = false
     if cost 
         if !_compute_controller_reach_with_cost!(
             contr,
@@ -373,7 +376,7 @@ function compute_controller_reach!(contr, abstract_system, autom, initlist, targ
         )
             println("\ncompute_controller_reach! terminated without covering init set")
             # ProgressMeter.finish!(prog)
-            return
+            return false
         end
     else 
         if !_compute_controller_reach!(
@@ -387,7 +390,8 @@ function compute_controller_reach!(contr, abstract_system, autom, initlist, targ
         end
     end
     # ProgressMeter.finish!(prog)
-    return println("\ncompute_controller_reach! terminated with success")
+    println("\ncompute_controller_reach! terminated with success")
+    return true
 end
 
 function _compute_pairstable(pairstable, autom)
