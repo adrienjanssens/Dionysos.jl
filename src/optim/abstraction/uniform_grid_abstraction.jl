@@ -204,6 +204,7 @@ function _compute_controller_reach!(
     next_targets,
 )
     num_init_unreachable = length(init_set)
+    reachab = length(target_set)
     while !isempty(current_targets) && !iszero(num_init_unreachable)
         empty!(next_targets)
         for target in current_targets
@@ -219,8 +220,10 @@ function _compute_controller_reach!(
                 end
             end
         end
+        reachab += length(next_targets)
         current_targets, next_targets = next_targets, current_targets
     end
+    println("number of reachable states: ", reachab)
     return iszero(num_init_unreachable)
 end
 function _data(contr, autom, initlist, targetlist)

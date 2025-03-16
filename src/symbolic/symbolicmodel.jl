@@ -107,7 +107,7 @@ function compute_symmodel_from_data!(
     dim = length(Xdom.grid.orig)
     Udom = symmodel.Udom
     tstep = contsys.tstep
-    divide = true
+    divide = false
     factor = 5
 
     Random.seed!(1234)
@@ -183,6 +183,7 @@ function compute_symmodel_from_controlsystem!(
     Xdom = symmodel.Xdom
     Udom = symmodel.Udom
     tstep = contsys.tstep
+    println(tstep)
     r = Xdom.grid.h / 2.0 + contsys.measnoise
     ntrans = 0
     # Vector to store transitions

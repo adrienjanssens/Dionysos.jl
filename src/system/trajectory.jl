@@ -138,8 +138,8 @@ function get_closed_loop_trajectory(contsys, controller, x0, nstep; stopping = (
     println("Total time: ", total_time)
     println("Energy: ", energy)
     println("Control effort: ", control_effort)
-    p = plot(t_traj, u_traj2, label="u(t)", seriestype=:steppost, xlabel="Time", ylabel="u", title="Step Plot of u")
-    display(p)
+    # p = plot(t_traj, u_traj2, label="u(t)", seriestype=:steppost, xlabel="Time", ylabel="u", title="Step Plot of u")
+    # display(p)
     return Control_trajectory(Trajectory(x_traj), Trajectory(u_traj))
 end
 
